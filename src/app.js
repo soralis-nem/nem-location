@@ -3,11 +3,9 @@ const logger = require('koa-logger')
 const session = require('koa-session');
 const bodyParser = require('koa-bodyparser');
 const Koa = require('koa');
+const {OAuth2Client} = require('google-auth-library');
 const path = require('path');
 
-
-const login = require('./auth.js');
-const auth = require('./login.js');
 
 const dataDir = path.join(__dirname, '../data/');
 const config = require(path.join(dataDir, 'config.json'));
@@ -33,32 +31,55 @@ process.on('unhandledRejection', console.dir);
 
 let app = new Koa();
 let router = new Router();
-
-app.keys = ['some secret hurr'];
-
-
-router.get('/login', async (ctx, next) => {
-	await auth();
-	const authUrl = await login(config);
-	ctx.body = authUrl;
-	//await next();
-});
-
-app.use(router.routes());
-app.use(router.allowedMethods());
 app.use(logger());
+app.keys = ['eahsrswysrh'];
+app.use(session(CONFIG, app));
 app.use(bodyParser({
 	onerror: function (err, ctx) {
 		ctx.throw('request invalid', 400);
 	}
 }));
 
-app.use(session(CONFIG, app));
+router.get('/login/google', async (ctx) => {
 
-app.use(async ctx => {
-	//リクエストをjsonにする
-	ctx.body = ctx.request.body;
+	const SCOPES = [
+		'https://www.googleapis.com/auth/userinfo.profile'
+	];
+	const clientSecret = config.web.client_secret;
+	const clientId = config.web.client_id;
+	const redirectUrl = "http://localhost:3000/login/google/redirect";
+	const oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUrl);
+	const authUrl = oauth2Client.generateAuthUrl({
+		access_type: 'offline',
+		scope: SCOPES
+	});
+	ctx.body = authUrl;
 });
+router.get('/login/google/redirect', async (ctx) => {
+	const clientSecret = config.web.client_secret;
+	const clientId = config.web.client_id;
+	const redirectUrl = "http://localhost:3000/login/google/redirect";
+
+	const oauth2Client = new OAuth2Client(clientId, clientSecret, redirectUrl);
+	const r = await oauth2Client.getToken(ctx.query['code'])
+	ctx.session.id_token = r.res.data.id_token;
+	ctx.session.login = true;
+	console.log(r.res.data);
+
+});
+
+app.use(async (ctx, next) => {
+	if (!ctx.path.startsWith('/login') &&
+		!ctx.session.login) {
+		ctx.throw(403, '{"status":"access_denied"}');
+	}
+	await next();
+});
+
+
+app.use(router.routes());
+app.use(router.allowedMethods());
+
 
 
 app.listen(3000);
